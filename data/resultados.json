@@ -1,0 +1,111 @@
+[ {
+  "id_resultado" : 3,
+  "nombre" : "Aspirante de Admisión",
+  "cif" : "2026-0001U",
+  "email" : "tu_correo_real_aqui@gmail.com",
+  "total_teorico" : 15,
+  "total_economico" : -1,
+  "total_estetico" : 9,
+  "total_social" : 9,
+  "total_politico" : 2,
+  "total_religioso" : -5,
+  "estado_evaluacion" : "Resultados Enviados",
+  "notes_entrevista" : "",
+  "notas_entrevista" : "yo",
+  "respuestas_guardadas" : {
+    "id_aspirante" : 3,
+    "respuestasP1" : {
+      "1" : {
+        "a" : 3,
+        "b" : 0
+      },
+      "2" : {
+        "a" : 3,
+        "b" : 0
+      },
+      "3" : {
+        "a" : 3,
+        "b" : 0
+      },
+      "4" : {
+        "a" : 3,
+        "b" : 0
+      }
+    },
+    "respuestasP2" : { }
+  }
+}, {
+  "id_resultado" : 7,
+  "nombre" : "Daysi",
+  "cif" : "22020679",
+  "email" : "tu_correo_real_aqui@gmail.com",
+  "total_teorico" : 28,
+  "total_economico" : 1,
+  "total_estetico" : 11,
+  "total_social" : 10,
+  "total_politico" : 2,
+  "total_religioso" : -5,
+  "estado_evaluacion" : "Resultados Enviados",
+  "notes_entrevista" : null,
+  "notas_entrevista" : "soy gessler",
+  "respuestas_guardadas" : {
+    "id_aspirante" : 7,
+    "respuestasP1" : {
+      "1" : {
+        "a" : 3,
+        "b" : 0
+      },
+      "2" : {
+        "a" : 3,
+        "b" : 0
+      },
+      "3" : {
+        "a" : 3,
+        "b" : 0
+      },
+      "4" : {
+        "a" : 3,
+        "b" : 0
+      },
+      "5" : {
+        "a" : 1,
+        "b" : 2
+      }
+    },
+    "respuestasP2" : {
+      "13" : {
+        "0" : 4
+      },
+      "14" : {
+        "0" : 4
+      },
+      "15" : {
+        "0" : 4
+      }
+    }
+  }
+}, {
+  "id_resultado" : 4,
+  "nombre" : "Gessler Herrera",
+  "cif" : "22020535",
+  "email" : "tu_correo_real_aqui@gmail.com",
+  "total_teorico" : 3,
+  "total_economico" : -1,
+  "total_estetico" : 9,
+  "total_social" : -3,
+  "total_politico" : 2,
+  "total_religioso" : -5,
+  "estado_evaluacion" : "Completado",
+  "notes_entrevista" : null,
+  "notas_entrevista" : null,
+  "respuestas_guardadas" : {
+    "id_aspirante" : 4,
+    "respuestasP1" : {
+      "31" : {
+        "a" : 3,
+        "b" : 0
+      }
+    },
+    "respuestasP2" : { }
+  }
+} ]
