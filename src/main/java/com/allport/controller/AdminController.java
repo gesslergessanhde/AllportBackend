@@ -1,13 +1,13 @@
 package com.allport.controller;
 
 import com.allport.model.Usuario;
-import com.allport.model.ContainerPreguntas;
 import com.allport.model.PreguntaItem;
-import com.allport.service.FileStorageService;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.sql.*;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -15,68 +15,231 @@ import java.util.Map;
 @RequestMapping("/api/admin")
 public class AdminController {
 
-    @Autowired
-    private FileStorageService storage;
+    @Value("${spring.datasource.url}")
+    private String dbUrl;
+
+    @Value("${spring.datasource.username}")
+    private String dbUser;
+
+    @Value("${spring.datasource.password}")
+    private String dbPassword;
 
     @GetMapping("/usuarios")
-    public ResponseEntity<List<Usuario>> getUsuariosMaster() { return ResponseEntity.ok(storage.obtenerUsuarios()); }
+    public ResponseEntity<List<Usuario>> getUsuariosMaster() {
+        List<Usuario> lista = new ArrayList<>();
+        String sql = "SELECT id_aspirante, nombre_aspirante, cif, password_hash, correo, rol FROM Aspirante";
+
+        try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                Usuario u = new Usuario();
+                u.setId_aspirante(rs.getInt("id_aspirante"));
+                u.setNombre_aspirante(rs.getString("nombre_aspirante"));
+                u.setCif(rs.getString("cif"));
+                u.setPassword_hash(rs.getString("password_hash"));
+                u.setRol(rs.getString("rol"));
+                lista.add(u);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return ResponseEntity.ok(lista);
+    }
 
     @PostMapping("/usuarios")
     public ResponseEntity<?> crearUsuario(@RequestBody Usuario u) {
-        List<Usuario> lista = storage.obtenerUsuarios();
-        int nextId = lista.stream().mapToInt(Usuario::getId_aspirante).max().orElse(0) + 1;
-        u.setId_aspirante(nextId);
-        lista.add(u);
-        storage.guardarUsuarios(lista);
+        String sqlMax = "SELECT ISNULL(MAX(id_aspirante), 0) + 1 FROM Aspirante";
+        String sqlIns = "INSERT INTO Aspirante (id_aspirante, nombre_aspirante, cif, fecha_registro, password_hash, correo, rol, id_estado, ultima_actualizacion) VALUES (?, ?, ?, CAST(GETDATE() AS DATE), ?, ?, ?, 1, CURRENT_TIMESTAMP)";
+
+        try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            int nextId;
+            try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sqlMax)) {
+                rs.next();
+                nextId = rs.getInt(1);
+            }
+            u.setId_aspirante(nextId);
+
+            try (PreparedStatement stmt = conn.prepareStatement(sqlIns)) {
+                stmt.setInt(1, nextId);
+                stmt.setString(2, u.getNombre_aspirante());
+                stmt.setString(3, u.getCif());
+                stmt.setString(4, u.getPassword_hash());
+                stmt.setString(5, u.getCif() + "@allport.com");
+                stmt.setString(6, u.getRol() != null && !u.getRol().trim().isEmpty() ? u.getRol() : "usuario");
+                stmt.executeUpdate();
+            }
+        } catch (SQLException e) {
+            return ResponseEntity.status(500).body("Error SQL al crear usuario: " + e.getMessage());
+        }
         return ResponseEntity.ok(Map.of("success", true, "user", u));
     }
 
     @DeleteMapping("/usuarios/{id}")
     public ResponseEntity<?> borrarUsuario(@PathVariable int id) {
-        List<Usuario> lista = storage.obtenerUsuarios();
-        lista.removeIf(u -> u.getId_aspirante() == id);
-        storage.guardarUsuarios(lista);
-        return ResponseEntity.ok(Map.of("success", true));
+        String sqlDeleteProgreso = "DELETE FROM Respuesta_progreso WHERE id_intento IN (SELECT id_intento FROM Intento_Test WHERE id_aspirante = ?)";
+        String sqlDeleteResultados = "DELETE FROM Resultado_axiologico WHERE id_intento IN (SELECT id_intento FROM Intento_Test WHERE id_aspirante = ?)";
+        String sqlDeleteIntentos = "DELETE FROM Intento_Test WHERE id_aspirante = ?";
+        String sqlDeleteAspirante = "DELETE FROM Aspirante WHERE id_aspirante = ?";
+
+        try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteProgreso)) { stmt.setInt(1, id); stmt.executeUpdate(); }
+                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteResultados)) { stmt.setInt(1, id); stmt.executeUpdate(); }
+                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteIntentos)) { stmt.setInt(1, id); stmt.executeUpdate(); }
+                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteAspirante)) { stmt.setInt(1, id); stmt.executeUpdate(); }
+                conn.commit();
+                return ResponseEntity.ok(Map.of("success", true));
+            } catch (SQLException ex) {
+                conn.rollback();
+                throw ex;
+            }
+        } catch (SQLException e) {
+            return ResponseEntity.status(500).body("Error SQL al eliminar usuario en cascada: " + e.getMessage());
+        }
     }
 
     @PostMapping("/preguntas/{parte}")
-    public ResponseEntity<?> añadirPregunta(@PathVariable String parte, @RequestBody PreguntaItem item) {
-        ContainerPreguntas dbs = storage.obtenerPreguntas();
-        if (parte.equals("p1")) {
-            int nId = dbs.getDb_preguntas_p1().stream().mapToInt(PreguntaItem::getId_item).max().orElse(0) + 1;
-            item.setId_item(nId);
-            item.setSeccion("Parte 1");
-            dbs.getDb_preguntas_p1().add(item);
-        } else {
-            int nId = dbs.getDb_preguntas_p2().stream().mapToInt(PreguntaItem::getId_item).max().orElse(0) + 1;
-            item.setId_item(nId);
-            dbs.getDb_preguntas_p2().add(item);
+    public ResponseEntity<?> añadirPregunta(@PathVariable String parte, @RequestBody Map<String, Object> body) {
+        String seccion = parte.equals("p1") ? "Parte 1" : "Parte 2";
+        String sqlMax = "SELECT ISNULL(MAX(id_item), 0) + 1 FROM Item_cuestionario";
+        String sqlIns = "INSERT INTO Item_cuestionario (id_item, texto_item, seccion, valor_asociado, dimension_allport) VALUES (?, ?, ?, 0, 'N/A')";
+        String sqlInsOpciones = "INSERT INTO opcion_respuesta (id_item, texto_opcion, letra_opcion) VALUES (?, ?, ?)";
+
+        try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            conn.setAutoCommit(false);
+            try {
+                int nextId;
+                try (Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sqlMax)) {
+                    rs.next();
+                    nextId = rs.getInt(1);
+                }
+
+                String textoItem = String.valueOf(body.get("texto_item") != null ? body.get("texto_item") : body.get("texto"));
+                try (PreparedStatement stmt = conn.prepareStatement(sqlIns)) {
+                    stmt.setInt(1, nextId);
+                    stmt.setString(2, textoItem);
+                    stmt.setString(3, seccion);
+                    stmt.executeUpdate();
+                }
+
+                if (parte.equals("p2")) {
+                    try (PreparedStatement stmtOpc = conn.prepareStatement(sqlInsOpciones)) {
+                        String[] letras = {"a", "b", "c", "d"};
+                        Map<String, Object> opcionesFormulario = (Map<String, Object>) body.get("opciones_nuevas");
+                        List<String> opcionesLista = (List<String>) body.get("opciones");
+
+                        for (String letra : letras) {
+                            String textoOpcionReal = "";
+                            if (opcionesFormulario != null && opcionesFormulario.containsKey(letra)) {
+                                textoOpcionReal = String.valueOf(opcionesFormulario.get(letra));
+                            } else if (opcionesLista != null) {
+                                int index = letra.charAt(0) - 'a';
+                                if (index < opcionesLista.size()) {
+                                    String str = opcionesLista.get(index);
+                                    textoOpcionReal = str.contains(". ") ? str.substring(str.indexOf(". ") + 2) : str;
+                                }
+                            }
+
+                            if (textoOpcionReal == null || textoOpcionReal.trim().isEmpty() || textoOpcionReal.equals("null")) {
+                                textoOpcionReal = "Opción " + letra.toUpperCase();
+                            }
+
+                            stmtOpc.setInt(1, nextId);
+                            stmtOpc.setString(2, textoOpcionReal.trim());
+                            stmtOpc.setString(3, letra);
+                            stmtOpc.addBatch();
+                        }
+                        stmtOpc.executeBatch();
+                    }
+                }
+
+                conn.commit();
+                return ResponseEntity.ok(Map.of("success", true));
+            } catch (SQLException ex) {
+                conn.rollback();
+                throw ex;
+            }
+        } catch (SQLException e) {
+            return ResponseEntity.status(500).body("Error SQL al añadir pregunta con opciones reales: " + e.getMessage());
         }
-        storage.guardarPreguntas(dbs);
-        return ResponseEntity.ok(Map.of("success", true));
     }
 
     @PutMapping("/preguntas/{parte}/{id}")
-    public ResponseEntity<?> editarPregunta(@PathVariable String parte, @PathVariable int id, @RequestBody PreguntaItem body) {
-        ContainerPreguntas dbs = storage.obtenerPreguntas();
-        if (parte.equals("p1")) {
-            dbs.getDb_preguntas_p1().stream().filter(p -> p.getId_item() == id).findFirst().ifPresent(p -> p.setTexto_item(body.getTexto_item()));
-        } else {
-            dbs.getDb_preguntas_p2().stream().filter(p -> p.getId_item() == id).findFirst().ifPresent(p -> {
-                p.setTexto_item(body.getTexto_item());
-                if (body.getOpciones() != null) p.setOpciones(body.getOpciones());
-            });
+    public ResponseEntity<?> editarPregunta(@PathVariable String parte, @PathVariable int id, @RequestBody Map<String, Object> body) {
+        int idReal = parte.equals("p2") && id <= 15 ? id + 31 : id;
+
+        String sqlUpdatePregunta = "UPDATE Item_cuestionario SET texto_item = ? WHERE id_item = ?";
+        String sqlUpdateOpcion = "UPDATE opcion_respuesta SET texto_opcion = ? WHERE id_item = ? AND letra_opcion = ?";
+
+        try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            conn.setAutoCommit(false);
+            try {
+                if (body.get("texto_item") != null) {
+                    try (PreparedStatement stmt = conn.prepareStatement(sqlUpdatePregunta)) {
+                        stmt.setString(1, String.valueOf(body.get("texto_item")));
+                        stmt.setInt(2, idReal);
+                        stmt.executeUpdate();
+                    }
+                }
+
+                // 🔍 SEGURO PARA EDICIÓN: Procesa tanto arrays planos como mapas con prefijo
+                if (body.get("opciones") != null) {
+                    List<String> opciones = (List<String>) body.get("opciones");
+                    try (PreparedStatement stmtOpc = conn.prepareStatement(sqlUpdateOpcion)) {
+                        for (String opc : opciones) {
+                            if (opc != null && opc.contains(". ")) {
+                                String letra = opc.split("\\. ")[0].trim().toLowerCase();
+                                String texto = opc.substring(opc.indexOf(". ") + 2).trim();
+
+                                stmtOpc.setString(1, texto);
+                                stmtOpc.setInt(2, idReal);
+                                stmtOpc.setString(3, letra);
+                                stmtOpc.addBatch();
+                            }
+                        }
+                        stmtOpc.executeBatch();
+                    }
+                }
+
+                conn.commit();
+                return ResponseEntity.ok(Map.of("success", true));
+            } catch (SQLException ex) {
+                conn.rollback();
+                throw ex;
+            }
+        } catch (SQLException e) {
+            return ResponseEntity.status(500).body("Error SQL al modificar pregunta u opciones: " + e.getMessage());
         }
-        storage.guardarPreguntas(dbs);
-        return ResponseEntity.ok(Map.of("success", true));
     }
 
     @DeleteMapping("/preguntas/{parte}/{id}")
     public ResponseEntity<?> removerPregunta(@PathVariable String parte, @PathVariable int id) {
-        ContainerPreguntas dbs = storage.obtenerPreguntas();
-        if (parte.equals("p1")) dbs.getDb_preguntas_p1().removeIf(p -> p.getId_item() == id);
-        else dbs.getDb_preguntas_p2().removeIf(p -> p.getId_item() == id);
-        storage.guardarPreguntas(dbs);
-        return ResponseEntity.ok(Map.of("success", true));
+        int idReal = parte.equals("p2") && id <= 15 ? id + 31 : id;
+
+        String sqlDeleteProgreso = "DELETE FROM Respuesta_progreso WHERE id_item = ?";
+        String sqlDeleteOpciones = "DELETE FROM opcion_respuesta WHERE id_item = ?";
+        String sqlDeleteItem = "DELETE FROM Item_cuestionario WHERE id_item = ?";
+
+        try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteProgreso)) { stmt.setInt(1, idReal); stmt.executeUpdate(); }
+                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteOpciones)) { stmt.setInt(1, idReal); stmt.executeUpdate(); }
+                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteItem)) {
+                    stmt.setInt(1, idReal);
+                    stmt.executeUpdate();
+                }
+
+                conn.commit();
+                return ResponseEntity.ok(Map.of("success", true));
+            } catch (SQLException ex) {
+                conn.rollback();
+                throw ex;
+            }
+        } catch (SQLException e) {
+            return ResponseEntity.status(500).body("Error SQL al remover pregunta e incisos: " + e.getMessage());
+        }
     }
 }
