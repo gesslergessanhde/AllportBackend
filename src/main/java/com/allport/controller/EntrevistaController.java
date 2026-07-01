@@ -50,10 +50,12 @@ public class EntrevistaController {
 
     @PostMapping("/entrevista/{idAspirante}")
     public ResponseEntity<?> guardarEntrevista(@PathVariable int idAspirante, @RequestBody Map<String, String> body) {
-        String notas = body.get("notas_entrevista");
+        String notas = body.get("notas");
+        if (notas == null) {
+            notas = body.get("notas_entrevista");
+        }
 
         String sqlCheck = "SELECT COUNT(*) FROM Intento_Test WHERE id_aspirante = ?";
-        // 🎯 Forzamos el guardado de notas junto al id_estado = 2 (Revisado)
         String sqlUpdate = "UPDATE Intento_Test SET notas_entrevista = ?, id_estado = 2 WHERE id_aspirante = ?";
         String sqlMaxIntento = "SELECT ISNULL(MAX(id_intento), 0) + 1 FROM Intento_Test";
         String sqlInsert = "INSERT INTO Intento_Test (id_intento, id_aspirante, id_estado, fecha_intento, tiempo_restante_segundos, notas_entrevista) VALUES (?, ?, 2, CAST(GETDATE() AS DATE), 0, ?)";
@@ -63,8 +65,8 @@ public class EntrevistaController {
 
             try (PreparedStatement checkStmt = conn.prepareStatement(sqlCheck)) {
                 checkStmt.setInt(1, idAspirante);
-                try (ResultSet rs = checkStmt.executeQuery()) {
-                    if (rs.next() && rs.getInt(1) > 0) {
+                try (ResultSet rsCheck = checkStmt.executeQuery()) { // 🎯 Corregido: rsCheck para no colisionar
+                    if (rsCheck.next() && rsCheck.getInt(1) > 0) {
                         existeIntento = true;
                     }
                 }
@@ -79,7 +81,7 @@ public class EntrevistaController {
             } else {
                 int nextIntentoId = 1;
                 try (Statement stmtMax = conn.createStatement();
-                     ResultSet rsMax = stmtMax.executeQuery(sqlMaxIntento)) {
+                     ResultSet rsMax = stmtMax.executeQuery(sqlMaxIntento)) { // 🎯 Corregido: rsMax para evitar duplicados
                     if (rsMax.next()) {
                         nextIntentoId = rsMax.getInt(1);
                     }

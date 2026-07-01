@@ -168,7 +168,8 @@ public class AdminController {
 
     @PutMapping("/preguntas/{parte}/{id}")
     public ResponseEntity<?> editarPregunta(@PathVariable String parte, @PathVariable int id, @RequestBody Map<String, Object> body) {
-        int idReal = parte.equals("p2") && id <= 15 ? id + 31 : id;
+        // 🎯 CORRECCIÓN: Si es Parte 2, el ID real en la BD siempre viene desfasado por +31 sin importar si es menor a 15
+        int idReal = parte.equals("p2") ? id + 31 : id;
 
         String sqlUpdatePregunta = "UPDATE Item_cuestionario SET texto_item = ? WHERE id_item = ?";
         String sqlUpdateOpcion = "UPDATE opcion_respuesta SET texto_opcion = ? WHERE id_item = ? AND letra_opcion = ?";
@@ -184,7 +185,6 @@ public class AdminController {
                     }
                 }
 
-                // 🔍 SEGURO PARA EDICIÓN: Procesa tanto arrays planos como mapas con prefijo
                 if (body.get("opciones") != null) {
                     List<String> opciones = (List<String>) body.get("opciones");
                     try (PreparedStatement stmtOpc = conn.prepareStatement(sqlUpdateOpcion)) {
@@ -216,7 +216,8 @@ public class AdminController {
 
     @DeleteMapping("/preguntas/{parte}/{id}")
     public ResponseEntity<?> removerPregunta(@PathVariable String parte, @PathVariable int id) {
-        int idReal = parte.equals("p2") && id <= 15 ? id + 31 : id;
+        // 🎯 CORRECCIÓN MUTUA: Sincroniza el ID real sumando 31 siempre que la petición provenga de la Parte 2
+        int idReal = parte.equals("p2") ? id + 31 : id;
 
         String sqlDeleteProgreso = "DELETE FROM Respuesta_progreso WHERE id_item = ?";
         String sqlDeleteOpciones = "DELETE FROM opcion_respuesta WHERE id_item = ?";
@@ -225,8 +226,19 @@ public class AdminController {
         try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
             conn.setAutoCommit(false);
             try {
-                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteProgreso)) { stmt.setInt(1, idReal); stmt.executeUpdate(); }
-                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteOpciones)) { stmt.setInt(1, idReal); stmt.executeUpdate(); }
+                // 1. Limpiar respuestas de alumnos si ya respondieron este ítem de prueba
+                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteProgreso)) {
+                    stmt.setInt(1, idReal);
+                    stmt.executeUpdate();
+                }
+
+                // 2. Limpiar las 4 opciones de la pregunta (a, b, c, d)
+                try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteOpciones)) {
+                    stmt.setInt(1, idReal);
+                    stmt.executeUpdate();
+                }
+
+                // 3. Borrar la pregunta raíz del cuestionario
                 try (PreparedStatement stmt = conn.prepareStatement(sqlDeleteItem)) {
                     stmt.setInt(1, idReal);
                     stmt.executeUpdate();
@@ -239,7 +251,7 @@ public class AdminController {
                 throw ex;
             }
         } catch (SQLException e) {
-            return ResponseEntity.status(500).body("Error SQL al remover pregunta e incisos: " + e.getMessage());
+            return ResponseEntity.status(500).body("Error SQL al remover pregunta e incisos en cascada: " + e.getMessage());
         }
     }
 }

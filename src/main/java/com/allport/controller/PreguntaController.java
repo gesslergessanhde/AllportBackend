@@ -46,9 +46,10 @@ public class PreguntaController {
     @GetMapping("/resultados")
     public ResponseEntity<?> getResultados() {
         List<Map<String, Object>> lista = new ArrayList<>();
+        // 🎯 Se incluye i.notas_entrevista para asegurar que el listado general del dashboard lea las observaciones
         String sql = "SELECT r.id_resultado, r.total_teorico, r.total_economico, r.total_estetico, " +
                 "r.total_social, r.total_politico, r.total_religioso, " +
-                "a.id_aspirante, a.nombre_aspirante, a.cif, a.correo, i.id_intento, i.id_estado " +
+                "a.id_aspirante, a.nombre_aspirante, a.cif, a.correo, i.id_intento, i.id_estado, i.notas_entrevista " +
                 "FROM Resultado_axiologico r " +
                 "INNER JOIN Intento_Test i ON r.id_intento = i.id_intento " +
                 "INNER JOIN Aspirante a ON i.id_aspirante = a.id_aspirante";
@@ -62,6 +63,7 @@ public class PreguntaController {
                 int idIntento = rs.getInt("id_intento");
                 int idAspirante = rs.getInt("id_aspirante");
                 int idEstado = rs.getInt("id_estado");
+                String notasEntrevista = rs.getString("notas_entrevista");
 
                 map.put("id_resultado", rs.getInt("id_resultado"));
                 map.put("nombre", rs.getString("nombre_aspirante"));
@@ -73,8 +75,9 @@ public class PreguntaController {
                 map.put("total_social", rs.getInt("total_social"));
                 map.put("total_politico", rs.getInt("total_politico"));
                 map.put("total_religioso", rs.getInt("total_religioso"));
+                map.put("notas_entrevista", notasEntrevista != null ? notasEntrevista : "");
 
-                // 🎯 MAPEO DE ESTADO ORIGINAL DINÁMICO
+                // MAPEO DE ESTADO ORIGINAL DINÁMICO
                 if (idEstado == 3) {
                     map.put("estado_evaluacion", "Resultados Enviados");
                 } else if (idEstado == 2) {
@@ -166,7 +169,6 @@ public class PreguntaController {
         String sqlMaxIntento = "SELECT ISNULL(MAX(id_intento), 0) + 1 FROM Intento_Test";
         String sqlMaxResultado = "SELECT ISNULL(MAX(id_resultado), 0) + 1 FROM Resultado_axiologico";
 
-        // 🎯 CORRECCIÓN ORIGINAL: El test inicia de forma limpia con id_estado = 1 ("Recibido")
         String sqlIntento = "INSERT INTO Intento_Test (id_intento, id_aspirante, id_estado, fecha_intento, tiempo_restante_segundos) VALUES (?, ?, 1, CAST(GETDATE() AS DATE), 0);";
         String sqlRes = "INSERT INTO Resultado_axiologico (id_resultado, id_intento, total_economico, total_politico, total_teorico, total_social, total_estetico, total_religioso, fecha_calculo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP);";
         String sqlProgreso = "INSERT INTO Respuesta_progreso (id_intento, id_item, letra_opcion, valor_puntos) VALUES (?, ?, ?, ?);";
@@ -249,11 +251,11 @@ public class PreguntaController {
 
     @PostMapping("/enviar-correo/{id}")
     public ResponseEntity<?> despacharCorreo(@PathVariable int id, @RequestBody Map<String, String> body) {
-        String sql = "SELECT r.*, a.nombre_aspirante, a.cif, a.correo FROM Resultado_axiologico r " +
+        // 🎯 CORRECCIÓN: Añadimos i.notas_entrevista a la consulta de selección
+        String sql = "SELECT r.*, a.nombre_aspirante, a.cif, a.correo, i.notas_entrevista FROM Resultado_axiologico r " +
                 "INNER JOIN Intento_Test i ON r.id_intento = i.id_intento " +
                 "INNER JOIN Aspirante a ON i.id_aspirante = a.id_aspirante WHERE r.id_resultado = ?";
 
-        // 🎯 Forzamos el guardado de id_estado = 3 (Resultados Enviados) al enviar por Gmail
         String sqlUpdateEstadoEmail = "UPDATE Intento_Test SET id_estado = 3 WHERE id_intento = (SELECT id_intento FROM Resultado_axiologico WHERE id_resultado = ?)";
 
         try (Connection conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
@@ -273,7 +275,10 @@ public class PreguntaController {
                     item.setTotal_politico(rs.getInt("total_politico"));
                     item.setTotal_religioso(rs.getInt("total_religioso"));
 
-                    // Se ejecuta la query para mover el estado a 3 en SQL Server
+                    // 🎯 CORRECCIÓN: Extraemos las anotaciones de la base de datos y se las asignamos al objeto Resultado
+                    String observacionesReal = rs.getString("notas_entrevista");
+                    item.setNotas_entrevista(observacionesReal != null ? observacionesReal : "");
+
                     try (PreparedStatement stmtState = conn.prepareStatement(sqlUpdateEstadoEmail)) {
                         stmtState.setInt(1, id);
                         stmtState.executeUpdate();
